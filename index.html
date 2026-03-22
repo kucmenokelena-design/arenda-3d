@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>ARENDA 3D: CHAPTER 1</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; touch-action: none; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        
+        /* Джойстик */
+        #joystick-zone { position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px; background: rgba(255,255,255,0.1); border-radius: 50%; pointer-events: auto; }
+        #joystick-stick { position: absolute; top: 35px; left: 35px; width: 50px; height: 50px; background: rgba(255,255,255,0.3); border-radius: 50%; }
+
+        /* Кнопки действий */
+        .btn { position: absolute; pointer-events: auto; width: 60px; height: 60px; border-radius: 50%; background: rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px; border: 2px solid white; }
+        #btn-flash { bottom: 40px; right: 40px; }
+        #btn-interact { bottom: 120px; right: 40px; display: none; background: rgba(255,215,0,0.4); }
+
+        /* Скример и Меню */
+        #death-screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: black; display: none; flex-direction: column; align-items: center; justify-content: center; z-index: 100; color: red; text-align: center; }
+        #main-menu { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #050505; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 200; color: white; }
+        
+        .scary-text { font-size: 40px; font-weight: bold; text-shadow: 0 0 10px red; margin-bottom: 20px; }
+        button { padding: 15px 40px; font-size: 20px; cursor: pointer; background: #222; color: white; border: 1px solid red; }
+    </style>
+</head>
+<body>
+
+    <div id="main-menu">
+        <h1>ARENDA 3D</h1>
+        <button onclick="startGame()">ИГРАТЬ</button>
+        <p style="font-size: 12px; margin-top: 20px;">Глава 1: В разработке | v1.0</p>
+    </div>
+
+    <div id="death-screen">
+        <div id="screamer-img" style="font-size: 100px;">💀</div>
+        <div class="scary-text">ДЛЯ НЕГО ТЫ ЛИШЬ ТУПАЯ ИГРУШКА...</div>
+        <button onclick="location.reload()">В МЕНЮ</button>
+    </div>
+
+    <div id="ui-layer">
+        <div id="joystick-zone"><div id="joystick-stick"></div></div>
+        <div id="btn-flash" class="btn">🔦</div>
+        <div id="btn-interact" class="btn">☝️</div>
+        <div id="timer" style="position: absolute; top: 20px; left: 20px; color: white;">12 PM</div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // --- ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+        let scene, camera, renderer, flashlight;
+        let moveForward = 0, moveSide = 0;
+        let isHiding = false;
+        let lookAlpha = 0, lookBeta = 0;
+        const collisions = [];
+
+        // --- ИНИЦИАЛИЗАЦИЯ ---
+        function init() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // Свет
+            flashlight = new THREE.SpotLight(0xffffff, 1.5, 12, Math.PI/6);
+            camera.add(flashlight);
+            camera.add(flashlight.target);
+            flashlight.target.position.set(0, 0, -1);
+            scene.add(camera);
+
+            // Комната
+            const roomGeo = new THREE.BoxGeometry(10, 5, 10);
+            const roomMat = new THREE.MeshPhongMaterial({ color: 0x222222, side: THREE.BackSide });
+            const room = new THREE.Mesh(roomGeo, roomMat);
+            scene.add(room);
+
+            // ПРЕДМЕТЫ
+            // Телевизор (Коллизия)
+            const tv = new THREE.Mesh(new THREE.BoxGeometry(1, 1.5, 0.2), new THREE.MeshPhongMaterial({color: 0x000}));
+            tv.position.set(-4, -1, -4);
+            scene.add(tv);
+            collisions.push(tv);
+
+            // Шкаф (Интерактив)
+            const wardrobe = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1), new THREE.MeshPhongMaterial({color: 0x3d2b1f}));
+            wardrobe.position.set(4, -1, -2);
+            wardrobe.name = "wardrobe";
+            scene.add(wardrobe);
+            collisions.push(wardrobe);
+
+            // Кровать (Интерактив)
+            const bed = new THREE.Mesh(new THREE.BoxGeometry(2, 0.8, 3), new THREE.MeshPhongMaterial({color: 0x555555}));
+            bed.position.set(-3, -2, 3);
+            bed.name = "bed";
+            scene.add(bed);
+            collisions.push(bed);
+
+            camera.position.y = 0;
+            animate();
+        }
+
+        // --- УПРАВЛЕНИЕ (2 КАСАНИЯ) ---
+        const joyZone = document.getElementById('joystick-zone');
+        const joyStick = document.getElementById('joystick-stick');
+        let touchLookId = null;
+
+        window.addEventListener('touchstart', e => {
+            for(let t of e.changedTouches) {
+                if (t.clientX > window.innerWidth / 2) touchLookId = t.identifier;
+            }
+        });
+
+        window.addEventListener('touchmove', e => {
+            e.preventDefault();
+            for(let t of e.changedTouches) {
+                // Джойстик
+                if (t.target === joyZone || t.target === joyStick) {
+                    let rect = joyZone.getBoundingClientRect();
+                    let dx = t.clientX - (rect.left + 60);
+                    let dy = t.clientY - (rect.top + 60);
+                    let dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+                    let angle = Math.atan2(dy, dx);
+                    joyStick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+                    moveForward = -Math.sin(angle) * (dist/40);
+                    moveSide = Math.cos(angle) * (dist/40);
+                }
+                // Вращение камеры
+                if (t.identifier === touchLookId) {
+                    lookAlpha -= e.movementX * 0.005 || 0;
+                    lookBeta -= e.movementY * 0.005 || 0;
+                }
+            }
+        }, {passive: false});
+
+        window.addEventListener('touchend', e => {
+            for(let t of e.changedTouches) {
+                if (t.target === joyZone || t.target === joyStick) {
+                    joyStick.style.transform = `translate(0,0)`;
+                    moveForward = 0; moveSide = 0;
+                }
+                if (t.identifier === touchLookId) touchLookId = null;
+            }
+        });
+
+        // --- ЛОГИКА МОНСТРОВ ---
+        function triggerScreamer() {
+            document.getElementById('death-screen').style.display = 'flex';
+            // Вибрация для Tecno
+            if(navigator.vibrate) navigator.vibrate([100, 50, 500]);
+        }
+
+        // Интерактив (Шкаф/Кровать)
+        document.getElementById('btn-interact').onclick = () => {
+            isHiding = !isHiding;
+            camera.position.y = isHiding ? -1.8 : 0;
+            document.getElementById('btn-interact').innerText = isHiding ? "🚪" : "☝️";
+        };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Движение с коллизиями (упрощенно)
+            if(!isHiding) {
+                camera.rotation.y = lookAlpha;
+                camera.rotation.x = Math.max(-1, Math.min(1, lookBeta));
+                camera.translateZ(-moveForward * 0.1);
+                camera.translateX(moveSide * 0.1);
+                
+                // Проверка дистанции до предметов
+                let distToWardrobe = camera.position.distanceTo(new THREE.Vector3(4, -1, -2));
+                document.getElementById('btn-interact').style.display = distToWardrobe < 2 ? 'flex' : 'none';
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.startGame = () => {
+            document.getElementById('main-menu').style.display = 'none';
+            init();
+        };
+
+        document.getElementById('btn-flash').onclick = () => flashlight.visible = !flashlight.visible;
+
+    </script>
+</body>
+</html>
